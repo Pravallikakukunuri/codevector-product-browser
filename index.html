@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Product Browser</title>
+<style>
+  :root {
+    --ink: #1c1c1a;
+    --paper: #f7f5f0;
+    --line: #d9d5c9;
+    --accent: #b5481f;
+    --muted: #76726a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, sans-serif;
+  }
+
+  header {
+    padding: 28px 32px 20px;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 22px;
+    letter-spacing: 0.02em;
+    font-family: Georgia, "Times New Roman", serif;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 16px 32px;
+    border-bottom: 1px solid var(--line);
+    flex-wrap: wrap;
+  }
+
+  select {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    color: var(--ink);
+  }
+
+  .count {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: "Courier New", monospace;
+    margin-left: auto;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    padding: 10px 32px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  tbody td {
+    padding: 10px 32px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  tbody tr:hover {
+    background: #efebe0;
+  }
+
+  .id-cell {
+    font-family: "Courier New", monospace;
+    color: var(--muted);
+  }
+
+  .category-tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+  }
+
+  .price {
+    font-family: "Courier New", monospace;
+    text-align: right;
+  }
+
+  .load-more-row {
+    text-align: center;
+    padding: 24px;
+  }
+
+  button#loadMore {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px 24px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+
+  button#loadMore:hover { background: #93371a; }
+  button#loadMore:disabled { background: var(--line); color: var(--muted); cursor: default; }
+
+  .end-message {
+    color: var(--muted);
+    font-size: 13px;
+    font-style: italic;
+  }
+
+  .loading-spinner {
+    font-family: "Courier New", monospace;
+    color: var(--muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Product Browser</h1>
+  <div class="subtitle">200,000 products &middot; newest first &middot; cursor-paginated</div>
+</header>
+
+<div class="controls">
+  <select id="categoryFilter">
+    <option value="">All categories</option>
+  </select>
+  <span class="count" id="countDisplay">loaded 0</span>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Name</th>
+      <th>Category</th>
+      <th>Created</th>
+      <th style="text-align:right;">Price</th>
+    </tr>
+  </thead>
+  <tbody id="productRows"></tbody>
+</table>
+
+<div class="load-more-row" id="loadMoreRow">
+  <button id="loadMore">Load more</button>
+</div>
+
+<script>
+  const API_BASE = "http://127.0.0.1:8000";
+
+  let nextCursor = null;
+  let currentCategory = "";
+  let totalLoaded = 0;
+
+  const rowsEl = document.getElementById("productRows");
+  const loadMoreBtn = document.getElementById("loadMore");
+  const loadMoreRow = document.getElementById("loadMoreRow");
+  const countDisplay = document.getElementById("countDisplay");
+  const categoryFilter = document.getElementById("categoryFilter");
+
+  async function loadCategories() {
+    const res = await fetch(`${API_BASE}/categories`);
+    const data = await res.json();
+    data.categories.forEach(cat => {
+      const opt = document.createElement("option");
+      opt.value = cat;
+      opt.textContent = cat;
+      categoryFilter.appendChild(opt);
+    });
+  }
+
+  function renderRow(p) {
+    const tr = document.createElement("tr");
+    const created = new Date(p.created_at).toLocaleString();
+    tr.innerHTML = `
+      <td class="id-cell">#${p.id}</td>
+      <td>${p.name}</td>
+      <td><span class="category-tag">${p.category}</span></td>
+      <td>${created}</td>
+      <td class="price">$${p.price.toFixed(2)}</td>
+    `;
+    rowsEl.appendChild(tr);
+  }
+
+  async function loadPage(reset = false) {
+    if (reset) {
+      rowsEl.innerHTML = "";
+      nextCursor = null;
+      totalLoaded = 0;
+    }
+
+    loadMoreBtn.disabled = true;
+    loadMoreBtn.textContent = "Loading...";
+
+    const params = new URLSearchParams({ limit: 20 });
+    if (currentCategory) params.set("category", currentCategory);
+    if (nextCursor) params.set("cursor", nextCursor);
+
+    try {
+      const res = await fetch(`${API_BASE}/products?${params.toString()}`);
+      const data = await res.json();
+
+      data.products.forEach(renderRow);
+      totalLoaded += data.products.length;
+      countDisplay.textContent = `loaded ${totalLoaded}`;
+
+      nextCursor = data.next_cursor;
+
+      if (!data.has_more) {
+        loadMoreRow.innerHTML = `<span class="end-message">No more products to load.</span>`;
+      } else {
+        loadMoreBtn.disabled = false;
+        loadMoreBtn.textContent = "Load more";
+      }
+    } catch (err) {
+      loadMoreRow.innerHTML = `<span class="end-message">Could not reach the API. Is the server running at ${API_BASE}?</span>`;
+    }
+  }
+
+  loadMoreBtn.addEventListener("click", () => loadPage(false));
+
+  categoryFilter.addEventListener("change", (e) => {
+    currentCategory = e.target.value;
+    loadMoreRow.innerHTML = `<button id="loadMore">Load more</button>`;
+    loadPage(true);
+    // re-bind since we replaced the button
+    document.getElementById("loadMore").addEventListener("click", () => loadPage(false));
+  });
+
+  loadCategories();
+  loadPage(true);
+</script>
+
+</body>
+</html>
